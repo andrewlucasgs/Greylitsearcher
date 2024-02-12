@@ -132,6 +132,7 @@ if search_button:
 
     # Placeholder for displaying messages and the results table
     status_placeholder = st.empty()
+    current_search_url_placeholder = st.empty()
     results_placeholder = st.empty()
 
     for page in range(number_of_pages):
@@ -139,6 +140,7 @@ if search_button:
         if page > 0:
             status_placeholder.write(f"Sleeping for 3 seconds before fetching page {page + 1}...")
             time.sleep(3)
+        status_placeholder.write(f"Fetching page {page + 1} of {number_of_pages}...")
         
         start_page = page
         search_url = build_google_search_url(
@@ -146,6 +148,7 @@ if search_button:
             at_least_one=at_least_one, without_words=without_words,
             date_range_start=date_range_start, date_range_end=date_range_end, start_page=start_page
         )
+        current_search_url_placeholder.write('Fetching: ' + search_url)
         search_urls.append(search_url)
         if page == 0:
             # Display search URL only for the first page to avoid clutter
@@ -159,6 +162,9 @@ if search_button:
         if page_results:
             df_results = pd.DataFrame(results)
             results_placeholder.dataframe(df_results[['title', 'link', 'description', 'domain', 'date']])  # Update the placeholder with new data
+
+        if page == number_of_pages - 1:
+            status_placeholder.write(f"Search completed. Fetched {len(results)} results from {number_of_pages} pages.")
 
     if len(results) > 0:
         # Convert DataFrame to CSV for download after all results are fetched
