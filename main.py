@@ -151,10 +151,6 @@ if search_button:
         )
         current_search_url_placeholder.write('Fetching: ' + search_url)
         search_urls.append(search_url)
-        if page == 0:
-            # Display search URL only for the first page to avoid clutter
-            status_placeholder.write('Search URL: ' + search_url)
-
         html = fetch_html(search_url)
         page_results = extract_google_search_results(html)
         # include a column for the search URL
@@ -172,7 +168,7 @@ if search_button:
 
     if len(results) > 0:
         # Convert DataFrame to CSV for download after all results are fetched
-        csv = df_results.to_csv(index=False)
+        csv = df_results.to_csv(index=True)
         st.download_button(
             label="Download search results as CSV",
             data=csv,
