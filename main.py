@@ -96,7 +96,8 @@ def extract_google_search_results(html):
             'link': link,
             'description': description,
             'domain': domain,
-            'date': date
+            'date': date,
+            'search_url': parsed_href.geturl(),
         })
 
     return results
@@ -156,12 +157,15 @@ if search_button:
 
         html = fetch_html(search_url)
         page_results = extract_google_search_results(html)
+        # include a column for the search URL
+        for result in page_results:
+            result['search_url'] = search_url
         results.extend(page_results)
 
         # Update the results table with new data after each page is fetched
         if page_results:
             df_results = pd.DataFrame(results)
-            results_placeholder.dataframe(df_results[['title', 'link', 'description', 'domain', 'date']])  # Update the placeholder with new data
+            results_placeholder.dataframe(df_results[['title', 'link', 'description', 'domain', 'date', 'search_url']])
 
         if page == number_of_pages - 1:
             status_placeholder.write(f"Search completed. Fetched {len(results)} results from {number_of_pages} pages.")
