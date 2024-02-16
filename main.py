@@ -1,16 +1,12 @@
-
 import streamlit as st
 import requests
 import re
 import pandas as pd
-# import bs4
 from bs4 import BeautifulSoup
+from urllib.parse import urlsplit, parse_qs
+import time
 
-
-def build_google_search_url(
-    site_search=None, all_words="", exact_phrase="", at_least_one="", without_words="",
-    date_range_start="", date_range_end="", start_page=0
-):
+def build_google_search_url(site_search=None, all_words="", exact_phrase="", at_least_one="", without_words="", date_range_start="", date_range_end="", start_page=0):
     base_url = "https://www.google.com/search?q="
     query_parts = []
 
@@ -41,55 +37,51 @@ def build_google_search_url(
 
     return base_url + "+".join(query_parts) + tbs + start
 
-
 def fetch_html(url):
     try:
         response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
-        response.raise_for_status()  # This will ensure that HTTP error responses, like 404 or 500, raise exceptions.
+        response.raise_for_status()
         return response.text
     except requests.RequestException as e:
-        return f"An error occurred: {e}"
-
-from urllib.parse import urlsplit, parse_qs
+        st.error(f"An error occurred: {e}")
+        return None
 
 def extract_google_search_results(html):
+    if not html:
+        return []
+
     soup = BeautifulSoup(html, 'html.parser')
     results = []
 
     for a in soup.find_all('a', href=True):
         title_element = a.find('h3')
         if not title_element:
-            continue  # Skip any 'a' elements that do not contain an 'h3' child
+            continue
 
         title = title_element.get_text()
 
-        # Attempt to extract the actual link from the 'a' tag's 'href' attribute
         parsed_href = urlsplit(a['href'])
         link = parse_qs(parsed_href.query).get('q')
         if link:
-            link = link[0]  # Extract the first item from the list if present
+            link = link[0]
             domain = urlsplit(link).netloc
         else:
-            continue  # Skip if no link is found
+            continue
 
-        # Description extraction is tricky without reliable classes; this approach tries to find a sibling or parent's sibling
         description = None
         sibling = a.find_next_sibling()
         if sibling and not sibling.find('h3'):
-            description = sibling.get_text(strip=True) 
+            description = sibling.get_text(strip=True)
         elif a.parent:
             sibling = a.parent.find_next_sibling()
             if sibling and not sibling.find('h3'):
                 description = sibling.get_text(strip=True)
 
-        # extract date from description, usually in the format "Apr 12, 2022" or "3 days ago"      
         date = None
         if description:
             date_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}', description)
             if date_match:
                 date = date_match.group(0)
-            
-
 
         results.append({
             'title': title,
@@ -97,18 +89,13 @@ def extract_google_search_results(html):
             'description': description,
             'domain': domain,
             'date': date,
-            'search_url': parsed_href.geturl(),
         })
 
     return results
 
 st.set_page_config(layout="wide")
-
-
-# Streamlit app starts here
 st.title('Greylitsearcher')
 
-# Using sidebar for input controls
 with st.sidebar:
     st.header('Search Criteria')
     site_search = st.text_area("Site Search (one per line)")
@@ -119,61 +106,38 @@ with st.sidebar:
     date_range_start = st.text_input("Date range start (YYYY-MM-DD)")
     date_range_end = st.text_input("Date range end (YYYY-MM-DD)")
     number_of_pages = st.number_input("Number of pages to search", min_value=1, value=1)
-
-    # Search button in sidebar
     search_button = st.button('Search')
 
-# import time
-import time
-
-# Main area for displaying results and download button
 if search_button:
-    results = []
-    search_urls = []
-
-    # Placeholder for displaying messages and the results table
-    status_placeholder = st.empty()
-    current_search_url_placeholder = st.empty()
+    all_results = []
+    status_text = st.empty()
     results_placeholder = st.empty()
 
     for page in range(number_of_pages):
-        # Sleep 3s between requests to avoid being blocked by Google
+        status_text.write(f"Fetching page {page + 1} of {number_of_pages}...")
+
         if page > 0:
-            status_placeholder.write(f"Sleeping for 3 seconds before fetching page {page + 1}...")
-            time.sleep(3)
-        status_placeholder.write(f"Fetching page {page + 1} of {number_of_pages}...")
-        
-        start_page = page
-        search_url = build_google_search_url(
-            site_search=site_search, all_words=all_words, exact_phrase=exact_phrase,
-            at_least_one=at_least_one, without_words=without_words,
-            date_range_start=date_range_start, date_range_end=date_range_end, start_page=start_page
-        )
-        current_search_url_placeholder.write('Fetching: ' + search_url)
-        search_urls.append(search_url)
+            time.sleep(3)  # Be polite with Google's servers
+
+        search_url = build_google_search_url(site_search, all_words, exact_phrase, at_least_one, without_words, date_range_start, date_range_end, page)
         html = fetch_html(search_url)
+
+        if html is None:
+            break  # If there's an error, stop fetching more pages
+
         page_results = extract_google_search_results(html)
-        # include a column for the search URL
-        for result in page_results:
-            result['search_url'] = search_url
-        results.extend(page_results)
+        all_results.extend(page_results)
 
-        # Update the results table with new data after each page is fetched
-        if page_results:
-            df_results = pd.DataFrame(results)
-            results_placeholder.dataframe(df_results[['title', 'link', 'description', 'domain', 'date', 'search_url']])
+        # Display results for each page as they are fetched
+        df_results = pd.DataFrame(all_results)
+        results_placeholder.dataframe(df_results)
 
-        if page == number_of_pages - 1:
-            status_placeholder.write(f"Search completed. Fetched {len(results)} results from {number_of_pages} pages.")
+        if len(page_results) == 0:
+            break  # If no results are found on the current page, stop fetching more pages
 
-    if len(results) > 0:
-        # Convert DataFrame to CSV for download after all results are fetched
-        csv = df_results.to_csv(index=True)
-        st.download_button(
-            label="Download search results as CSV",
-            data=csv,
-            file_name='google_search_results.csv',
-            mime='text/csv',
-        )
+    if all_results:
+        status_text.write(f"Search completed. Found {len(all_results)} results.")
+        csv = df_results.to_csv(index=False)
+        st.download_button("Download search results as CSV", csv, "google_search_results.csv", "text/csv", key='download-csv')
     else:
-        status_placeholder.write("No results found.")
+        st.write("No results found or there was an error fetching the results.")
