@@ -1,143 +1,175 @@
+from time import sleep
+import pandas as pd
 import streamlit as st
 import requests
-import re
-import pandas as pd
-from bs4 import BeautifulSoup
-from urllib.parse import urlsplit, parse_qs
-import time
+from dotenv import load_dotenv
+load_dotenv()
+# Search engine CXs
+GS_CX = [
+    st.secrets['GS1_CX'],
+    st.secrets['GS1_CX'],
+    st.secrets['GS1_CX']
+]
 
-def build_google_search_url(site_search=None, all_words="", exact_phrase="", at_least_one="", without_words="", date_range_start="", date_range_end="", start_page=0):
-    base_url = "https://www.google.com/search?q="
-    query_parts = []
+# API keys
+GS_KEYS = [
+    st.secrets['GS1_KEY'],
+    st.secrets['GS2_KEY'],
+    st.secrets['GS3_KEY'],
+]
 
-    if site_search:
-        sites = " OR ".join([f"site:{site.strip()}" for site in site_search.split('\n') if site.strip()])
-        query_parts.append(sites)
 
-    if all_words:
-        query_parts.append("+".join(all_words.split()))
+def google_search(page, site, **kwargs):
+    url = 'https://www.googleapis.com/customsearch/v1'
+    params = {
+        'q': '',
+        'key': '',
+        'cx': '',
+        'num': 10,
+        'start': page * 10 + 1,
+        'siteSearch': site
+    }
+    params.update(kwargs)
+    for cx, key in zip(GS_CX, GS_KEYS):
+        params['cx'] = cx
+        params['key'] = key
+        # return {'items': [{'link': 'https://www.google.com'}]}
+        response = requests.get(url, params=params).json()
+        # Check if the response is successful or if the rate limit has been exceeded
+        if not response.get('error') or 'rateLimitExceeded' not in response['error']['errors'][0]['reason']:
+            return response
+    # If all keys exceeded the rate limit, print an error message
+    print("All keys have exceeded the rate limit.")
+    return None
 
-    if exact_phrase:
-        query_parts.append(f'"{"+".join(exact_phrase.split())}"')
 
-    if at_least_one:
-        or_words = " OR ".join(at_least_one.split())
-        query_parts.append(or_words)
-
-    if without_words:
-        query_parts.extend([f"-{word}" for word in without_words.split()])
-
-    tbs = ""
-    if date_range_start and date_range_end:
-        tbs = f"&tbs=cdr:1,cd_min:{date_range_start.replace('-', '/')},cd_max:{date_range_end.replace('-', '/')}"
-
-    start = ""
-    if start_page > 0:
-        start = f"&start={start_page * 10}"
-
-    return base_url + "+".join(query_parts) + tbs + start
-
-def fetch_html(url):
-    try:
-        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as e:
-        st.error(f"An error occurred: {e}")
-        return None
-
-def extract_google_search_results(html):
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, 'html.parser')
-    results = []
-
-    for a in soup.find_all('a', href=True):
-        title_element = a.find('h3')
-        if not title_element:
-            continue
-
-        title = title_element.get_text()
-
-        parsed_href = urlsplit(a['href'])
-        link = parse_qs(parsed_href.query).get('q')
-        if link:
-            link = link[0]
-            domain = urlsplit(link).netloc
-        else:
-            continue
-
-        description = None
-        sibling = a.find_next_sibling()
-        if sibling and not sibling.find('h3'):
-            description = sibling.get_text(strip=True)
-        elif a.parent:
-            sibling = a.parent.find_next_sibling()
-            if sibling and not sibling.find('h3'):
-                description = sibling.get_text(strip=True)
-
-        date = None
-        if description:
-            date_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}', description)
-            if date_match:
-                date = date_match.group(0)
-
-        results.append({
-            'title': title,
-            'link': link,
-            'description': description,
-            'domain': domain,
-            'date': date,
-        })
-
-    return results
-
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Greylitsearcher",
+                   page_icon="🔍️",)
 st.title('Greylitsearcher')
+st.write("""
+Greylitsearcher is a tool that helps you find grey literature on the web.\n
+You can get up to 40 results from each website. If the first search doesn't give you enough results, it will keep searching until it finds up to 40.
+""")
 
-with st.sidebar:
-    st.header('Search Criteria')
-    site_search = st.text_area("Site Search (one per line)")
-    all_words = st.text_input("All these words")
-    exact_phrase = st.text_input("This exact word or phrase")
-    at_least_one = st.text_input("Any of these words")
-    without_words = st.text_input("None of these words")
-    date_range_start = st.text_input("Date range start (YYYY-MM-DD)")
-    date_range_end = st.text_input("Date range end (YYYY-MM-DD)")
-    number_of_pages = st.number_input("Number of pages to search", min_value=1, value=1)
-    search_button = st.button('Search')
+
+with st.expander("Search 1", expanded=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        and1 = st.text_input(
+            "All these words", help="Appends the specified query terms to the query, as if they were combined with a logical AND operator.", key='and1')
+        exact1 = st.text_input("This exact word or phrase",
+                               help="Identifies a phrase that all documents in the search results must contain.", key='exact1')
+    with col2:
+        any1 = st.text_input(
+            "Any of these words", help="Provides additional search terms to check for in a document, where each document in the search results must contain at least one of the additional search terms.", key='any1')
+        none1 = st.text_input(
+            "None of these words", help="Identifies a word or phrase that should not appear in any documents in the search results.", key='none1')
+
+with st.expander("Search 2"):
+    col3, col4 = st.columns(2)
+    with col3:
+        and2 = st.text_input(
+            "All these words", help="Appends the specified query terms to the query, as if they were combined with a logical AND operator.", key='and2')
+        exact2 = st.text_input("This exact word or phrase",
+                               help="Identifies a phrase that all documents in the search results must contain.", key='exact2')
+    with col4:
+        any2 = st.text_input(
+            "Any of these words", help="Provides additional search terms to check for in a document, where each document in the search results must contain at least one of the additional search terms.", key='any2')
+        none2 = st.text_input(
+            "None of these words", help="Identifies a word or phrase that should not appear in any documents in the search results.", key='none2')
+
+with st.expander("Search 3"):
+    col5, col6 = st.columns(2)
+    with col5:
+        and3 = st.text_input(
+            "All these words", help="Appends the specified query terms to the query, as if they were combined with a logical AND operator.", key='and3')
+        exact3 = st.text_input("This exact word or phrase",
+                               help="Identifies a phrase that all documents in the search results must contain.", key='exact3')
+    with col6:
+        any3 = st.text_input(
+            "Any of these words", help="Provides additional search terms to check for in a document, where each document in the search results must contain at least one of the additional search terms.", key='any3')
+        none3 = st.text_input(
+            "None of these words", help="Identifies a word or phrase that should not appear in any documents in the search results.", key='none3')
+
+websites = st.text_area("Websites to search",
+                        key='websites',
+                        help="Enter one website per line",
+                        placeholder="example.com\nexample2.com"
+                        )
+
+
+search_button = st.button('Search')
+
+
+limitExceeded = False
 
 if search_button:
-    all_results = []
-    status_text = st.empty()
-    results_placeholder = st.empty()
+    st.session_state['results'] = {}
+    websites = websites.split('\n')
+    for website in websites:
+        if website:
+            st.session_state['results'][website] = []
+            for page in range(4):
+                current_results = google_search(
+                    page, website, q=and1, exactTerms=exact1, orTerms=any1, excludeTerms=none1)
+                if current_results == None:
+                    limitExceeded = True
+                    break
+                for item in current_results.get('items', []):
+                    item['priority'] = 1
 
-    for page in range(number_of_pages):
-        status_text.write(f"Fetching page {page + 1} of {number_of_pages}...")
+                st.session_state['results'][website].extend(
+                    current_results.get('items', []))
+                if len(st.session_state['results'][website]) >= 40 or len(current_results.get('items', [])) < 10:
+                    break
+            if len(st.session_state['results'][website]) < 40 and (and2 or exact2 or any2 or none2):
+                for page in range(8):
+                    current_results = google_search(
+                        page, website, q=and2, exactTerms=exact2, orTerms=any2, excludeTerms=none2)
+                    if current_results == None:
+                        limitExceeded = True
+                        break
+                    for item in current_results.get('items', []):
+                        item['priority'] = 2
 
-        if page > 0:
-            time.sleep(3)  # Be polite with Google's servers
+                    st.session_state['results'][website].extend([item for item in current_results.get(
+                        'items', []) if item['link'] not in [i['link'] for i in st.session_state['results'][website]]])
 
-        search_url = build_google_search_url(site_search, all_words, exact_phrase, at_least_one, without_words, date_range_start, date_range_end, page)
-        html = fetch_html(search_url)
+                    if len(st.session_state['results'][website]) >= 40 or len(current_results.get('items', [])) < 10:
+                        break
+            if len(st.session_state['results'][website]) < 40 and (and3 or exact3 or any3 or none3):
+                for page in range(10):
+                    current_results = google_search(
+                        page, website, q=and3, exactTerms=exact3, orTerms=any3, excludeTerms=none3)
+                    if current_results == None:
+                        limitExceeded = True
+                        break
+                    for item in current_results.get('items', []):
+                        item['priority'] = 3
+                    st.session_state['results'][website].extend([item for item in current_results.get(
+                        'items', []) if item['link'] not in [i['link'] for i in st.session_state['results'][website]]])
 
-        if html is None:
-            break  # If there's an error, stop fetching more pages
+                    if len(st.session_state['results'][website]) >= 40 or len(current_results.get('items', [])) < 10:
+                        break
+            st.session_state['results'][website] = st.session_state['results'][website][:40]
 
-        page_results = extract_google_search_results(html)
-        all_results.extend(page_results)
-
-        # Display results for each page as they are fetched
-        df_results = pd.DataFrame(all_results)
-        results_placeholder.dataframe(df_results)
-
-        if len(page_results) == 0:
-            break  # If no results are found on the current page, stop fetching more pages
-
-    if all_results:
-        status_text.write(f"Search completed. Found {len(all_results)} results.")
-        csv = df_results.to_csv(index=False)
-        st.download_button("Download search results as CSV", csv, "google_search_results.csv", "text/csv", key='download-csv')
-    else:
-        st.write("No results found or there was an error fetching the results.")
+if 'results' in st.session_state.keys():
+    for website in st.session_state['results']:
+        cols = st.columns(2)
+        with cols[0]:
+            st.write(
+                f"{len(st.session_state['results'][website])} results for {website}")
+        with cols[1]:
+            df = pd.DataFrame(st.session_state['results'][website])
+            csv = df.to_csv(index=False)
+            btn = st.download_button(
+                label="Download results as CSV",
+                data=csv,
+                file_name=f"{website.replace('.', '_')}_results.csv",
+                mime="text/csv"
+            )
+        st.dataframe(st.session_state['results'][website],
+                    use_container_width=True
+                    )
+        if limitExceeded:
+            st.write('Rate limit exceeded. Please try again later.')
