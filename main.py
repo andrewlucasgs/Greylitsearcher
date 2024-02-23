@@ -2,8 +2,7 @@ from time import sleep
 import pandas as pd
 import streamlit as st
 import requests
-from dotenv import load_dotenv
-load_dotenv()
+
 # Search engine CXs
 GS_CX = [
     st.secrets['GS1_CX'],
