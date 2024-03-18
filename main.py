@@ -1,4 +1,3 @@
-from time import sleep
 import pandas as pd
 import streamlit as st
 import requests
